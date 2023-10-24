@@ -1,4 +1,4 @@
-name: Docker Publish
+name: WiX Docker Publish
 
 on:
   push:
@@ -25,10 +25,20 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_REPOSITORY }}/${{ secrets.DOCKERHUB_IMAGENAME }}
 
+      - name: Modify Tag
+        id: modifytag
+        run: |
+          IFS=',' read -ra TAGS_ARRAY <<< "${{ steps.meta.outputs.tags }}"
+          NEW_TAGS=()
+          for tag in "${TAGS_ARRAY[@]}"; do
+              NEW_TAGS+=("${tag}-wix")
+          done
+          echo "newtags=$(IFS=,; echo "${NEW_TAGS[*]}")" >> $GITHUB_OUTPUT
+
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          file: Dockerfile
+          tags: ${{ steps.modifytag.outputs.newtags }}
+          file: Dockerfile.wix

@@ -2,15 +2,15 @@ import datetime
 import json
 import time
 from datetime import datetime
-import uuid
+import requests
 
 import streamlit as st
+import streamlit.components.v1 as components
 from langchain.schema import AIMessage, HumanMessage
 from streamlit.web.server.websocket_headers import _get_websocket_headers
 
 import ui_config
 import utils
-import wix_oauth as wix_oauth
 from sensitivity_checker import check_text_sensitivity
 from top_k_mappings import top_k_mappings
 from utils import (
@@ -35,50 +35,118 @@ from utils import (
 ui = ui_config.create_ui_from_config()
 st.set_page_config(page_title=ui.page_title, layout="wide", page_icon=ui.page_icon)
 
-# CSS style injection
-st.markdown(
-    ui.page_markdown,
-    unsafe_allow_html=True,
-)
-
-if "state" not in st.session_state:
-    st.session_state["state"] = str(uuid.uuid4()).replace("-", "")
-if "code_verifier" not in st.session_state:
-    st.session_state["code_verifier"] = str(uuid.uuid4()).replace("-", "")
-
-if "username" not in st.session_state or st.session_state["username"] is None:
-    if st.secrets["wix_oauth"] and "logged_in" not in st.session_state:
-        try:
-            (
-                auth,
-                st.session_state["username"],
-                st.session_state["subsription"],
-            ) = wix_oauth.check_wix_oauth()
-        except:
-            pass
-    elif st.secrets["anonymous_allowed"]:
+if "username" not in st.session_state:
+    if st.secrets["anonymous_allowed"]:
         st.session_state["username"] = random_email()
-        auth = True
-    elif not st.secrets["anonymous_allowed"]:
-        if ui.need_fixed_passwd is True:
-            auth = check_password()
-            if auth:
-                st.session_state["username"] = random_email()
-        elif ui.need_fixed_passwd is False:
-            auth = False
-            st.session_state["username"] = _get_websocket_headers().get(
-                "Username", None
-            )
-            if st.session_state["username"] is not None:
-                auth = True
+    else:
+        st.session_state["username"] = _get_websocket_headers().get(
+            "Username", "unknown@unknown.com"
+        )
 
-try:
-    if auth:
-        st.session_state["logged_in"] = True
-except:
-    pass
 
-if "logged_in" in st.session_state:
+# st.write(st.session_state["username"])
+
+
+CLIENT_ID = st.secrets["wix_client_id"]
+# REDIRECT_URI = st.secrets["wix_redirect_uri"]
+
+
+def wix_get_access_token():
+    request = requests.post(
+        "https://www.wixapis.com/oauth2/token",
+        headers={
+            "content-type": "application/json",
+        },
+        json={"clientId": CLIENT_ID, "grantType": "anonymous"},
+    )
+    return request.json()["access_token"]
+
+
+def wix_login(access_token: str, username: str, password: str):
+    url = "https://www.wixapis.com/_api/iam/authentication/v2/login"
+
+    headers = {
+        "authorization": access_token,
+        "content-type": "application/json",
+    }
+
+    data = {"loginId": {"email": username}, "password": password}
+
+    response = requests.post(url, headers=headers, json=data)
+    response_text = json.loads(response.text)
+
+    if response_text["state"] == "SUCCESS":
+        session_token = response_text["sessionToken"]
+        respond = requests.post(
+            "https://www.wixapis.com/_api/redirects-api/v1/redirect-session",
+            headers={
+                "authorization": access_token,
+                "content-type": "application/json",
+            },
+            json={
+                "auth": {
+                    "authRequest": {
+                        "clientId": CLIENT_ID,
+                        "codeChallenge": "JNU5gZmEjgVL2eXfgSmUW3S2E202k2rkq4u3M_drdCY",
+                        "codeChallengeMethod": "S256",
+                        "responseMode": "web_message",
+                        "responseType": "code",
+                        "scope": "offline_access",
+                        "state": "Z4dy7JM2S7n35VnBhdMeOQyXQW7UkE2Q1afdPLL419o",
+                        "sessionToken": session_token,
+                    }
+                }
+            },
+        )
+
+        url_response = respond.json()["redirectSession"]["fullUrl"]
+
+        my_component = components.declare_component("my_component", url=url_response)
+
+        # Send data to the frontend using named arguments.
+        return_value = my_component(url=url_response)
+
+        # `my_component`'s return value is the data returned from the frontend.
+        st.write("Value = ", return_value)
+
+        orders_response = requests.get(
+            "https://www.wixapis.com/pricing-plans/v2/member/orders",
+            headers={"authorization": session_token},
+        )
+
+    return response.json()
+
+
+col_left, col_center, col_right = st.columns(3)
+
+with col_center:
+    with st.form(key="login_form"):
+        username = st.text_input("username")
+        password = st.text_input("password", type="password")
+        submit = st.form_submit_button("Login")
+
+if submit:
+    wix_access_token = wix_get_access_token()
+    wix_login_response = wix_login(
+        access_token=wix_access_token, username=username, password=password
+    )
+
+
+st.stop()
+
+if ui.need_passwd is False:
+    auth = True
+else:
+    auth = check_password()
+
+
+if auth:
+    # 注入CSS style, 修改最上渐变条颜色
+    st.markdown(
+        ui.page_markdown,
+        unsafe_allow_html=True,
+    )
+
     # SIDEBAR
     with st.sidebar:
         st.markdown(
@@ -91,14 +159,6 @@ if "logged_in" in st.session_state:
         with col_text:
             st.title(ui.sidebar_title)
         st.subheader(ui.sidebar_subheader)
-
-        if "subsription" in st.session_state:
-            st.markdown(
-                ui.sidebar_welcome_text.format(
-                    username=st.session_state["username"].split("@")[0],
-                    subscription=st.session_state["subsription"],
-                )
-            )
 
         with st.expander(ui.sidebar_expander_title, expanded=True):
             search_knowledge_base = st.toggle(
@@ -322,9 +382,7 @@ if "logged_in" in st.session_state:
                 docs_response = []
                 docs_response.extend(
                     search_pinecone(
-                        query=query,
-                        filters=filters,
-                        top_k=search_knowledge_base_top_k,
+                        query=query, filters=filters, top_k=search_knowledge_base_top_k
                     )
                 )
                 docs_response.extend(search_internet(query, top_k=search_online_top_k))
@@ -337,17 +395,16 @@ if "logged_in" in st.session_state:
                 )
 
                 input = f""" You must:
-    use "{chat_history_recent}" to decide the response more concise or more detailed;
-    based on the "{docs_response}" and your own knowledge, provide a logical, clear, well-organized, and critically analyzed respond in the language of "{user_query}";
-    use bullet points only when necessary;
-    give in-text citations where relevant in Author-Date mode, NOT in Numeric mode;
-    list full reference information with hyperlinks at the end, for only those cited in the text.
+use "{chat_history_recent}" to decide the response more concise or more detailed;
+based on the "{docs_response}" and your own knowledge, provide a logical, clear, well-organized, and critically analyzed respond in the language of "{user_query}";
+use bullet points only when necessary;
+give in-text citations where relevant in Author-Date mode, NOT in Numeric mode;
+list full reference information with hyperlinks at the end, for only those cited in the text.
 
-    You must not:
-    include any duplicate or redundant information;
-    translate reference to query's language;
-    return any prefix like "AI:".
-    """
+You must not:
+include any duplicate or redundant information;
+translate reference to query's language;
+return any prefix like "AI:"."""
 
                 with st.chat_message("assistant", avatar=ui.chat_ai_avatar):
                     st_cb = StreamHandler(st.empty())

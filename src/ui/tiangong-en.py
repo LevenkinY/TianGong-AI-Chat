@@ -1,5 +1,13 @@
 ui_data = {
-    "need_passwd": False,
+    "need_fixed_passwd": False,
+    "wix_login_title": "TianGong Login",
+    "wix_login_username_label": "Email Address",
+    "wix_login_password_label": "Password",
+    "wix_login_button_label": "Log in",
+    "wix_signup_button_label": "Or Sign Up on Our Website 🌐",
+    "wix_login_error_text": "Login failed, please check your username and password.",
+    "wix_signup_button_url": "https://www.example.com/",
+    "wix_login_error_icon": "🚨",
     "theme": {
         "primaryColor": "#82318E",
     },
@@ -66,6 +74,7 @@ ui_data = {
     "sidebar_image": "src/static/logo.png",
     "sidebar_title": "TianGong Chat",
     "sidebar_subheader": "AI for Science 🔬 - Intelligent Chatbot",
+    "sidebar_welcome_text": """Hi, **{username}**! You're currently on the **{subscription}** plan.""",
     "sidebar_markdown": """
         <div style="position: fixed; left:25px; bottom: 10px; height:110px; width: 315px; font-size: 14px; font-weight: bold; background-color: #F0F2F6;">
             <table style="border: 0; position: absolute; bottom: 35px;">
